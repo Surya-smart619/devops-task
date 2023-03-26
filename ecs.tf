@@ -9,7 +9,7 @@ resource "aws_ecs_task_definition" "myapp" {
   container_definitions = jsonencode([
     {
       name  = "myapp",
-      image = "suryasmart619/express",
+      image = "docker.io/suryasmart619/express",
       portMappings = [
         {
           containerPort = 3000,
@@ -65,16 +65,31 @@ resource "aws_ecs_service" "myapp" {
   launch_type      = "FARGATE"
   network_configuration {
     security_groups = [aws_security_group.myapp.id]
-    subnets         = aws_subnet.private.*.id
+    subnets         = [aws_subnet.private1.id, aws_subnet.private2.id]
   }
+
+  depends_on = [
+    aws_lb.myapp,
+    # aws_internet_gateway_attachment.myapp
+  ]
 }
+
+resource "aws_internet_gateway" "myapp" {
+  vpc_id = aws_vpc.myapp.id
+}
+
+# resource "aws_internet_gateway_attachment" "myapp" {
+#   vpc_id             = aws_vpc.myapp.id
+#   internet_gateway_id = aws_internet_gateway.myapp.id
+# }
 
 # Create a load balancer target group to route traffic to the service
 resource "aws_lb_target_group" "myapp" {
   name     = "myapp"
   port     = 3000
   protocol = "HTTP"
-
+  vpc_id   = aws_vpc.myapp.id
+  target_type     = "ip"
   health_check {
     path = "/"
   }
@@ -98,17 +113,27 @@ resource "aws_lb" "myapp" {
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.myapp_lb.id]
-  # Note below
-  subnets            = aws_subnet.private.*.id
+  subnets            = [aws_subnet.private1.id, aws_subnet.private2.id]
 
   tags = {
     Name = "myapp"
   }
+
+  depends_on = [
+    # aws_internet_gateway_attachment.myapp
+  ]
 }
+
+# resource "aws_lb_target_group_attachment" "myapp" {
+#   target_group_arn = aws_lb_target_group.myapp.arn
+#   target_id        = aws_ecs_service.myapp.id
+#   port             = 80
+# }
 
 # Create a security group for the load balancer
 resource "aws_security_group" "myapp_lb" {
   name_prefix = "myapp_lb"
+  vpc_id      = aws_vpc.myapp.id
   ingress {
     from_port   = 80
     to_port     = 80
@@ -118,10 +143,15 @@ resource "aws_security_group" "myapp_lb" {
 }
 
 # Create private subnets for Fargate
-resource "aws_subnet" "private" {
-  count             = 2
-  cidr_block        = "10.0.${count.index + 1}.0/24"
+resource "aws_subnet" "private1" {
+  cidr_block        = "10.0.0.0/24"
   availability_zone = "us-west-2a"
+  vpc_id            = aws_vpc.myapp.id
+}
+
+resource "aws_subnet" "private2" {
+  cidr_block        = "10.0.1.0/24"
+  availability_zone = "us-west-2b"
   vpc_id            = aws_vpc.myapp.id
 }
 
@@ -135,6 +165,13 @@ resource "aws_security_group" "myapp" {
     to_port     = 3000
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["0.0.0.0/0"]
   }
 }
 
